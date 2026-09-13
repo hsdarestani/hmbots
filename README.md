@@ -1,46 +1,56 @@
-# White-label Server Reseller Bot
+# Mahan Cloud Telegram VPS Bot
 
-A reusable Telegram bot template for selling cloud servers through a reseller API. Each deployment is isolated: one Telegram bot token, one reseller API key, one brand and one local customer database.
+Production-ready, white-label Telegram reseller bot. Customer messages show only the configured brand; the upstream provider name and API key never reach the Telegram UI.
 
-## What it includes
+## Supported upstream API
 
-- Fully white-label customer UI: no upstream provider name is shown to customers.
-- Live plan catalog from the reseller API.
-- Configurable percentage/fixed markup and price rounding.
-- Local customer wallets.
-- Manual top-up workflow with receipt review by admins.
-- Server purchase, ownership mapping, list/details, power on/off, traffic, password reset and deletion.
-- Background provisioning watcher that delivers IP/root credentials once the server is ready.
-- SQLite persistence.
-- Docker deployment.
+The bot is implemented against the reseller API in `hamoon-private`:
 
-## Setup
+- Base URL: `https://pay.hamooncloud.ir/api/v1`
+- Authentication: `Authorization: Bearer $HAMOON_API_KEY`
+- Account: `GET /me`, `/wallet`, `/usage`, `/prices`
+- Servers: list, detail, create, power on/off, reset root password, traffic and permanent delete.
+
+The API does **not** expose a reboot endpoint in v1; consequently the bot does not pretend that restart works. The user can safely power off then power on.
+
+## Features
+
+- Main menu: buy server, my servers, wallet, top-up and support.
+- Live plan/pricing catalogue from the reseller API; no hard-coded upstream pricing.
+- Percentage or fixed reseller margin, with price rounding.
+- Local SQLite customer wallet, manual deposit receipt and atomic admin approval/rejection.
+- Local ownership map: every server action verifies its Telegram owner before calling the API.
+- Provisioning watcher sends IP and one-time root password when the server becomes active.
+- Power on/off, password reset, traffic display, status and two-step irreversible deletion.
+- Admin panel: users, active servers, pending deposits, customer balances and upstream connectivity/balance. `/credit <telegramId> <amount>` credits a customer manually.
+- Docker deployment with a persistent `./data` volume and safe API error handling.
+
+## Deploy
 
 ```bash
+git clone https://github.com/hsdarestani/hmbots.git
+cd hmbots
 cp .env.example .env
-npm install
+# Set BOT_TOKEN, HAMOON_API_KEY and payment-card details
+docker compose up -d --build
+docker compose logs -f bot
+```
+
+For non-Docker development:
+
+```bash
+npm ci
 npm test
 npm start
 ```
 
-For Docker:
+## Required environment
 
-```bash
-cp .env.example .env
-docker compose up -d --build
-```
+- `BOT_TOKEN`
+- `HAMOON_API_KEY`
 
-## Required environment variables
+Defaults are already set for Mahan Cloud, admin `1478447415`, support `@MBA_200007`, and the production API URL. Override `ADMIN_IDS`, `BRAND_NAME`, or `SUPPORT_USERNAME` only for another white-label deployment.
 
-- `BOT_TOKEN`: Telegram bot token.
-- `ADMIN_IDS`: comma-separated Telegram numeric IDs for bot admins.
-- `UPSTREAM_API_URL`: reseller API base URL ending in `/api/v1`.
-- `UPSTREAM_API_KEY`: API key for this reseller deployment.
+Use `PROFIT_TYPE=percentage` and `PROFIT_VALUE=30` for a 30% margin (e.g. 300,000 becomes 390,000). Use `PROFIT_TYPE=fixed` for a fixed currency margin.
 
-Branding, pricing, payment text, plan filtering and provisioning options are configured in `.env.example`.
-
-## Deployment model
-
-Use one clone/container per reseller. Do not share one API key between unrelated sellers. The upstream key must never be sent to Telegram clients and must stay only in the bot server environment.
-
-The bot keeps downstream customer balances and server ownership locally, while the upstream reseller account remains the payer/owner seen by the core API.
+Never commit a real `.env` or forward a bot API key/root password.
