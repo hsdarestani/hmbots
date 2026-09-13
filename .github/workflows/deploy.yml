@@ -61,6 +61,8 @@ jobs:
             printf 'DEFAULT_DURATION=monthly\n'
             printf 'PRICE_ROUND_TO=1000\n'
             printf 'CURRENCY_LABEL=تومان\n'
+            printf 'PAYMENT_CARD=6219861422915552\\n'
+            printf 'PAYMENT_CARD_HOLDER=بارانی\\n'
             printf 'DB_PATH=/app/data/bot.sqlite\n'
           } > .env
 
