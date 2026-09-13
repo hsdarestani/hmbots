@@ -80,10 +80,20 @@ jobs:
             set -eu
             cd /opt/mahan-cloud-bot
             chmod 600 .env
-            docker compose -p mahan-cloud-bot up -d --build --remove-orphans
-            sleep 12
+            if ! command -v docker >/dev/null 2>&1; then
+              apt-get update -qq
+              DEBIAN_FRONTEND=noninteractive apt-get install -y docker.io docker-compose
+              systemctl enable --now docker
+            fi
+            if docker compose version >/dev/null 2>&1; then
+              compose() { docker compose "$@"; }
+            else
+              compose() { docker-compose "$@"; }
+            fi
+            compose -p mahan-cloud-bot up -d --build --remove-orphans
+            sleep 15
             test "$(docker inspect -f "{{.State.Running}}" mahan-cloud-bot-bot-1)" = "true"
-            LOGS="$(docker compose -p mahan-cloud-bot logs --no-color --tail=100 bot)"
+            LOGS="$(compose -p mahan-cloud-bot logs --no-color --tail=100 bot)"
             printf "%s\n" "$LOGS"
             printf "%s" "$LOGS" | grep -q "\[startup\] upstream API authenticated"
             printf "%s" "$LOGS" | grep -q "\[startup\] Mahan Cloud bot is running"
