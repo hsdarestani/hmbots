@@ -1,0 +1,91 @@
+name: Deploy production bot
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: hmbots-production
+  cancel-in-progress: true
+
+jobs:
+  test-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install and validate
+        run: |
+          npm ci
+          npm test
+
+      - name: Validate deployment secrets
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          HAMOON_API_KEY: ${{ secrets.HAMOON_API_KEY }}
+          SERVER_IP: ${{ secrets.SERVER_IP }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PASSWORD: ${{ secrets.SERVER_PASSWORD }}
+        run: |
+          test -n "$BOT_TOKEN"
+          test -n "$HAMOON_API_KEY"
+          test -n "$SERVER_IP"
+          test -n "$SERVER_USER"
+          test -n "$SERVER_PASSWORD"
+
+      - name: Prepare runtime environment
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          BOT_USERNAME: ${{ secrets.BOT_USERNAME }}
+          HAMOON_API_KEY: ${{ secrets.HAMOON_API_KEY }}
+        run: |
+          umask 077
+          {
+            printf 'BOT_TOKEN=%s\n' "$BOT_TOKEN"
+            printf 'BOT_USERNAME=%s\n' "$BOT_USERNAME"
+            printf 'HAMOON_API_KEY=%s\n' "$HAMOON_API_KEY"
+            printf 'HAMOON_API_BASE_URL=https://pay.hamooncloud.ir/api/v1\n'
+            printf 'ADMIN_IDS=1478447415\n'
+            printf 'BRAND_NAME=Mahan Cloud\n'
+            printf 'SUPPORT_USERNAME=@MBA_200007\n'
+            printf 'PROFIT_TYPE=percentage\n'
+            printf 'PROFIT_VALUE=30\n'
+            printf 'DEFAULT_IMAGE=ubuntu-24.04\n'
+            printf 'DEFAULT_LOCATION=nbg1\n'
+            printf 'DEFAULT_DURATION=monthly\n'
+            printf 'PRICE_ROUND_TO=1000\n'
+            printf 'CURRENCY_LABEL=تومان\n'
+            printf 'DB_PATH=/app/data/bot.sqlite\n'
+          } > .env
+
+      - name: Deploy and verify
+        env:
+          SERVER_IP: ${{ secrets.SERVER_IP }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PASSWORD: ${{ secrets.SERVER_PASSWORD }}
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass rsync
+          export SSHPASS="$SERVER_PASSWORD"
+          SSH_ARGS="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=15"
+          sshpass -e ssh $SSH_ARGS "$SERVER_USER@$SERVER_IP" "mkdir -p /opt/mahan-cloud-bot"
+          sshpass -e rsync -az --delete --exclude=.git --exclude=data -e "ssh $SSH_ARGS" ./ "$SERVER_USER@$SERVER_IP:/opt/mahan-cloud-bot/"
+          sshpass -e ssh $SSH_ARGS "$SERVER_USER@$SERVER_IP" '
+            set -eu
+            cd /opt/mahan-cloud-bot
+            chmod 600 .env
+            docker compose -p mahan-cloud-bot up -d --build --remove-orphans
+            sleep 12
+            test "$(docker inspect -f "{{.State.Running}}" mahan-cloud-bot-bot-1)" = "true"
+            LOGS="$(docker compose -p mahan-cloud-bot logs --no-color --tail=100 bot)"
+            printf "%s\n" "$LOGS"
+            printf "%s" "$LOGS" | grep -q "\[startup\] upstream API authenticated"
+            printf "%s" "$LOGS" | grep -q "\[startup\] Mahan Cloud bot is running"
+          '
