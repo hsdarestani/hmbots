@@ -64,6 +64,7 @@ class CoreApi {
   changeIp(id) { return this.request('POST', `/servers/${encodeURIComponent(id)}/change-ip`, {}); }
   listAdditionalIps(id) { return this.request('GET', `/servers/${encodeURIComponent(id)}/additional-ips`); }
   addAdditionalIp(id, description = '') { return this.request('POST', `/servers/${encodeURIComponent(id)}/additional-ips`, { description }); }
+  deleteAdditionalIp(id, floatingIpId) { return this.request('DELETE', `/servers/${encodeURIComponent(id)}/additional-ips/${encodeURIComponent(floatingIpId)}`); }
   buyTrafficAddon(id, packageTb, nonce) { return this.request('POST', `/servers/${encodeURIComponent(id)}/traffic-addons`, { package_tb: packageTb, nonce }); }
   rebuildImages(id) { return this.request('GET', `/servers/${encodeURIComponent(id)}/rebuild-images`); }
   rebuild(id, image) { return this.request('POST', `/servers/${encodeURIComponent(id)}/rebuild`, { image }); }
