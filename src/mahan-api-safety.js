@@ -33,7 +33,9 @@ Database.prototype.markDeleted = async function guardedMarkDeleted(serverId) {
   deleteOutcome.delete(id);
   if (outcome === 'failed') {
     console.error('[mahan-delete-safety] upstream delete failed; local server kept visible', { server_id: id });
-    return false;
+    const error = new Error('UPSTREAM_DELETE_NOT_CONFIRMED');
+    error.code = 'UPSTREAM_DELETE_NOT_CONFIRMED';
+    throw error;
   }
   return originalMarkDeleted.call(this, serverId);
 };
