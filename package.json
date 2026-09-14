@@ -5,8 +5,8 @@
   "description": "White-label Telegram bot for reselling cloud servers through an upstream API",
   "main": "src/bot.js",
   "scripts": {
-    "start": "node --require ./src/mahan-runtime-defaults.js --require ./src/mahan-api-safety.js --require ./src/mahan-admin-enhancement.js --require ./src/mahan-admin-body-buffer.js --require ./src/mahan-admin-security.js --require ./src/mahan-admin-login-replay.js --require ./src/mahan-admin-public-check.js --require ./src/mahan-patch.js --require ./src/mahan-existing-billing-migration.js src/bot.js",
-    "check": "node --check src/config.js && node --check src/core-api.js && node --check src/db.js && node --check src/mahan-runtime-defaults.js && node --check src/mahan-api-safety.js && node --check src/mahan-admin-enhancement.js && node --check src/mahan-admin-body-buffer.js && node --check src/mahan-admin-security.js && node --check src/mahan-admin-login-replay.js && node --check src/mahan-admin-public-check.js && node --check src/mahan-patch.js && node --check src/mahan-existing-billing-migration.js && node --check src/bot.js",
+    "start": "node --require ./src/mahan-runtime-defaults.js --require ./src/mahan-api-safety.js --require ./src/mahan-admin-enhancement.js --require ./src/mahan-admin-body-buffer.js --require ./src/mahan-admin-security.js --require ./src/mahan-admin-login-replay.js --require ./src/mahan-admin-public-check.js --require ./src/mahan-patch.js --require ./src/mahan-server-management.js --require ./src/mahan-existing-billing-migration.js src/bot.js",
+    "check": "node --check src/config.js && node --check src/core-api.js && node --check src/db.js && node --check src/mahan-runtime-defaults.js && node --check src/mahan-api-safety.js && node --check src/mahan-admin-enhancement.js && node --check src/mahan-admin-body-buffer.js && node --check src/mahan-admin-security.js && node --check src/mahan-admin-login-replay.js && node --check src/mahan-admin-public-check.js && node --check src/mahan-patch.js && node --check src/mahan-server-management.js && node --check src/mahan-existing-billing-migration.js && node --check src/bot.js",
     "test": "npm run check"
   },
   "engines": {
