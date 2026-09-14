@@ -1,0 +1,17 @@
+cloud.mahanmofagh.ir {
+    encode zstd gzip
+
+    header {
+        X-Content-Type-Options nosniff
+        Referrer-Policy no-referrer
+        -Server
+    }
+
+    @admin path /admin /admin/*
+    reverse_proxy @admin bot:8787
+
+    @health path /health
+    reverse_proxy @health bot:8787
+
+    respond 404
+}
