@@ -7,11 +7,13 @@ cloud.mahanmofagh.ir {
         -Server
     }
 
-    @admin path /admin /admin/*
-    reverse_proxy @admin bot:8787
+    route {
+        @admin path /admin /admin/*
+        reverse_proxy @admin bot:8787
 
-    @health path /health
-    reverse_proxy @health bot:8787
+        @health path /health
+        reverse_proxy @health bot:8787
 
-    respond 404
+        respond 404
+    }
 }
