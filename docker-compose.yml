@@ -3,6 +3,10 @@ services:
     build: .
     restart: unless-stopped
     env_file: .env
+    environment:
+      ADMIN_PANEL_PUBLIC_URL: https://cloud.mahanmofagh.ir
+    ports:
+      - "127.0.0.1:8787:8787"
     volumes:
       - bot_data:/app/data
 
