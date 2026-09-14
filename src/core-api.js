@@ -57,6 +57,7 @@ class CoreApi {
   powerOn(id) { return this.request('POST', `/servers/${encodeURIComponent(id)}/poweron`, {}); }
   powerOff(id) { return this.request('POST', `/servers/${encodeURIComponent(id)}/poweroff`, {}); }
   resetPassword(id) { return this.request('POST', `/servers/${encodeURIComponent(id)}/reset-password`, {}); }
+  rename(id, name) { return this.request('PATCH', `/servers/${encodeURIComponent(id)}/name`, { name }); }
   traffic(id) { return this.request('GET', `/servers/${encodeURIComponent(id)}/traffic`); }
   changeBillingCycle(id, duration) { return this.request('POST', `/servers/${encodeURIComponent(id)}/billing-cycle`, { duration }); }
   safeUpgrade(id, targetServerType, upgradeDisk = false) { return this.request('POST', `/servers/${encodeURIComponent(id)}/upgrade-safe`, { target_server_type: targetServerType, upgrade_disk: !!upgradeDisk }); }
