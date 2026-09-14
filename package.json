@@ -5,8 +5,8 @@
   "description": "White-label Telegram bot for reselling cloud servers through an upstream API",
   "main": "src/bot.js",
   "scripts": {
-    "start": "node src/bot.js",
-    "check": "node --check src/config.js && node --check src/core-api.js && node --check src/db.js && node --check src/bot.js",
+    "start": "node --require ./src/mahan-patch.js src/bot.js",
+    "check": "node --check src/config.js && node --check src/core-api.js && node --check src/db.js && node --check src/mahan-patch.js && node --check src/bot.js",
     "test": "npm run check"
   },
   "engines": {
