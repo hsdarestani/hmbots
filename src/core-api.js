@@ -58,6 +58,14 @@ class CoreApi {
   powerOff(id) { return this.request('POST', `/servers/${encodeURIComponent(id)}/poweroff`, {}); }
   resetPassword(id) { return this.request('POST', `/servers/${encodeURIComponent(id)}/reset-password`, {}); }
   traffic(id) { return this.request('GET', `/servers/${encodeURIComponent(id)}/traffic`); }
+  changeBillingCycle(id, duration) { return this.request('POST', `/servers/${encodeURIComponent(id)}/billing-cycle`, { duration }); }
+  safeUpgrade(id, targetServerType, upgradeDisk = false) { return this.request('POST', `/servers/${encodeURIComponent(id)}/upgrade-safe`, { target_server_type: targetServerType, upgrade_disk: !!upgradeDisk }); }
+  changeIp(id) { return this.request('POST', `/servers/${encodeURIComponent(id)}/change-ip`, {}); }
+  listAdditionalIps(id) { return this.request('GET', `/servers/${encodeURIComponent(id)}/additional-ips`); }
+  addAdditionalIp(id, description = '') { return this.request('POST', `/servers/${encodeURIComponent(id)}/additional-ips`, { description }); }
+  buyTrafficAddon(id, packageTb, nonce) { return this.request('POST', `/servers/${encodeURIComponent(id)}/traffic-addons`, { package_tb: packageTb, nonce }); }
+  rebuildImages(id) { return this.request('GET', `/servers/${encodeURIComponent(id)}/rebuild-images`); }
+  rebuild(id, image) { return this.request('POST', `/servers/${encodeURIComponent(id)}/rebuild`, { image }); }
 }
 
 module.exports = { CoreApi, CoreApiError };
