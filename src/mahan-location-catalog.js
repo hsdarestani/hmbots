@@ -12,7 +12,7 @@ const { CoreApi, CoreApiError } = require('./core-api');
 const db = new Database(config.dbPath);
 const api = new CoreApi(config.upstream);
 const cache = new Map();
-const CACHE_MS = 60_000;
+const CACHE_MS = 5 * 60_000;
 
 const locationLabels = {
   nbg1: '🇩🇪 آلمان • نورنبرگ',
@@ -116,7 +116,7 @@ async function editOrSend(bot, q, text, keyboard) {
 async function showPlans(bot, q, duration, location) {
   const validDuration = ['hourly', 'monthly'].includes(duration) ? duration : 'monthly';
   const validLocation = String(location || '').trim().toLowerCase();
-  const list = (await plansFor(validLocation, true)).filter(plan => upstreamPrice(plan, validDuration) > 0);
+  const list = (await plansFor(validLocation)).filter(plan => upstreamPrice(plan, validDuration) > 0);
 
   if (!list.length) {
     await bot.answerCallbackQuery(q.id).catch(() => {});
@@ -154,7 +154,7 @@ async function showPlans(bot, q, duration, location) {
 async function showPlan(bot, q, duration, location, planId) {
   const validDuration = ['hourly', 'monthly'].includes(duration) ? duration : 'monthly';
   const validLocation = String(location || '').trim().toLowerCase();
-  const plan = await findPlan(validLocation, planId, true);
+  const plan = await findPlan(validLocation, planId);
   await bot.answerCallbackQuery(q.id).catch(() => {});
   if (!plan || !(upstreamPrice(plan, validDuration) > 0)) {
     cache.delete(validLocation);
@@ -179,8 +179,8 @@ async function buy(bot, q, duration, location, planId) {
   const userId = String(q.from.id);
   const chatId = q.message.chat.id;
 
-  // Always bypass the local cache immediately before charging the customer.
-  const plan = await findPlan(validLocation, planId, true);
+  // Reuse the location-scoped cache; POST /servers validates the exact location again before provisioning.
+  const plan = await findPlan(validLocation, planId);
   if (!plan || !(upstreamPrice(plan, validDuration) > 0)) {
     cache.delete(validLocation);
     await bot.answerCallbackQuery(q.id, { text: 'این پلن در لوکیشن انتخابی قابل ارائه نیست.', show_alert: true }).catch(() => {});
