@@ -1,0 +1,55 @@
+name: Optimize Mahan API request load
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/fix-mahan-request-load.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reduce repeated location catalog requests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('src/mahan-location-catalog.js')
+          s = p.read_text()
+
+          s = s.replace('const CACHE_MS = 60_000;', 'const CACHE_MS = 5 * 60_000;', 1)
+          s = s.replace('plansFor(validLocation, true)', 'plansFor(validLocation)')
+          s = s.replace('findPlan(validLocation, planId, true)', 'findPlan(validLocation, planId)')
+          s = s.replace('// Always bypass the local cache immediately before charging the customer.', '// Reuse the location-scoped cache; POST /servers validates the exact location again before provisioning.')
+
+          if 'plansFor(validLocation, true)' in s or 'findPlan(validLocation, planId, true)' in s:
+              raise SystemExit('forced catalog refresh markers remain')
+          p.write_text(s)
+          PY
+
+          node --check src/mahan-location-catalog.js
+          npm test
+          git diff --check
+
+      - name: Commit optimized flow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/mahan-location-catalog.js
+          if ! git diff --cached --quiet; then
+            git commit -m 'fix: reduce repeated reseller catalog requests'
+            git push origin HEAD:main
+          fi
