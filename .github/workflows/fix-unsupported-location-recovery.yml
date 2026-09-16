@@ -26,33 +26,12 @@ jobs:
           from pathlib import Path
           p = Path('src/mahan-location-catalog.js')
           s = p.read_text()
-          old = """  } catch (error) {
-    await db.credit(userId, sale);
-    await bot.editMessageText(
-      `❌ ساخت سرور انجام نشد و مبلغ کامل به کیف پول برگشت داده شد.\\n\\n${friendlyError(error)}`,
-      { chat_id: chatId, message_id: statusMessage.message_id }
-    );
-  }"""
-          new = """  } catch (error) {
-    await db.credit(userId, sale);
-    const staleLocation = error instanceof CoreApiError && (
-      error.code === 'UNSUPPORTED_LOCATION' ||
-      /unsupported location for server type/i.test(String(error.message || ''))
-    );
-    if (staleLocation) cache.delete(validLocation);
-    await bot.editMessageText(
-      `❌ ساخت سرور انجام نشد و مبلغ کامل به کیف پول برگشت داده شد.\\n\\n${friendlyError(error)}${staleLocation ? '\\n\\nلیست این لوکیشن تازه‌سازی شد؛ لطفاً دوباره پلن را انتخاب کنید.' : ''}`,
-      {
-        chat_id: chatId,
-        message_id: statusMessage.message_id,
-        reply_markup: staleLocation ? { inline_keyboard: [[{ text: '🔄 پلن‌های معتبر این لوکیشن', callback_data: `mxloc:${validDuration}:${validLocation}` }]] } : undefined
-      }
-    );
-  }"""
-          if old not in s and new not in s:
-              raise SystemExit('buy catch marker not found')
+          old = "  } catch (error) {\n    await db.credit(userId, sale);\n    await bot.editMessageText(\n      `❌ ساخت سرور انجام نشد و مبلغ کامل به کیف پول برگشت داده شد.\\n\\n${friendlyError(error)}`,\n      { chat_id: chatId, message_id: statusMessage.message_id }\n    );\n  }"
+          new = "  } catch (error) {\n    await db.credit(userId, sale);\n    const staleLocation = error instanceof CoreApiError && (\n      error.code === 'UNSUPPORTED_LOCATION' ||\n      /unsupported location for server type/i.test(String(error.message || ''))\n    );\n    if (staleLocation) cache.delete(validLocation);\n    await bot.editMessageText(\n      `❌ ساخت سرور انجام نشد و مبلغ کامل به کیف پول برگشت داده شد.\\n\\n${friendlyError(error)}${staleLocation ? '\\n\\nلیست این لوکیشن تازه‌سازی شد؛ لطفاً دوباره پلن را انتخاب کنید.' : ''}`,\n      {\n        chat_id: chatId,\n        message_id: statusMessage.message_id,\n        reply_markup: staleLocation ? { inline_keyboard: [[{ text: '🔄 پلن‌های معتبر این لوکیشن', callback_data: `mxloc:${validDuration}:${validLocation}` }]] } : undefined\n      }\n    );\n  }"
           if old in s:
               s = s.replace(old, new, 1)
+          elif new not in s:
+              raise SystemExit('buy catch marker not found')
           p.write_text(s)
           PY
           node --check src/mahan-location-catalog.js
