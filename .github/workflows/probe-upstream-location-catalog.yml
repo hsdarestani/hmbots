@@ -1,0 +1,49 @@
+name: Probe upstream location catalogs
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/probe-upstream-location-catalog.yml'
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Query reseller catalogs by location
+        env:
+          HAMOON_API_KEY: ${{ secrets.HAMOON_API_KEY }}
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const https = require('https');
+          const key = process.env.HAMOON_API_KEY;
+          if (!key) throw new Error('missing api key');
+          function get(location) {
+            return new Promise((resolve, reject) => {
+              const req = https.get(`https://pay.hamooncloud.ir/api/v1/prices?location=${encodeURIComponent(location)}`, {
+                headers: { Authorization: `Bearer ${key}`, Accept: 'application/json' }
+              }, res => {
+                let body = '';
+                res.on('data', c => body += c);
+                res.on('end', () => {
+                  let json = null;
+                  try { json = JSON.parse(body); } catch {}
+                  resolve({ status: res.statusCode, json });
+                });
+              });
+              req.on('error', reject);
+            });
+          }
+          (async () => {
+            for (const location of ['nbg1','fsn1','hel1','ash','hil','sin']) {
+              const {status,json} = await get(location);
+              const plans = Array.isArray(json?.plans) ? json.plans.map(p => String(p.id || '')).filter(Boolean) : [];
+              console.log(JSON.stringify({location,status,count:plans.length,plans}));
+            }
+          })().catch(e => { console.error(e.message); process.exit(1); });
+          NODE
