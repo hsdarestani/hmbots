@@ -49,7 +49,10 @@ class CoreApi {
 
   me() { return this.request('GET', '/me'); }
   wallet() { return this.request('GET', '/wallet'); }
-  prices() { return this.request('GET', '/prices'); }
+  prices(location = '') {
+    const suffix = location ? `?location=${encodeURIComponent(String(location).trim().toLowerCase())}` : '';
+    return this.request('GET', `/prices${suffix}`);
+  }
   listServers() { return this.request('GET', '/servers'); }
   getServer(id) { return this.request('GET', `/servers/${encodeURIComponent(id)}`); }
   createServer(payload) { return this.request('POST', '/servers', payload); }
