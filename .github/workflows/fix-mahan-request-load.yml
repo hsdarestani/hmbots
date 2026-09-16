@@ -1,3 +1,4 @@
+# Source patch is now committed; this workflow also serves as a safe manual repair path.
 name: Optimize Mahan API request load
 
 on:
