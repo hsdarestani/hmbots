@@ -1,0 +1,96 @@
+name: Fix Mahan location-aware catalog
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/fix-location-aware-catalog.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Patch location-scoped plan cache and purchase flow
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('src/mahan-patch.js')
+          s = p.read_text()
+
+          s = s.replace('let planCache = { at: 0, plans: [] };', 'const planCache = new Map();', 1)
+
+          old_error = "  if (error.code === 'INSUFFICIENT_WALLET') return 'موجودی حساب تأمین‌کننده کافی نیست؛ مدیریت مطلع شد.';\n  return error.message || 'عملیات انجام نشد.';"
+          new_error = "  if (error.code === 'INSUFFICIENT_WALLET') return 'موجودی حساب تأمین‌کننده کافی نیست؛ مدیریت مطلع شد.';\n  if (error.code === 'UNSUPPORTED_LOCATION' || /unsupported location for server type/i.test(String(error.message || ''))) return 'این پلن در لوکیشن انتخابی قابل ارائه نیست. لطفاً پلن دیگری انتخاب کنید.';\n  return error.message || 'عملیات انجام نشد.';"
+          if old_error in s:
+              s = s.replace(old_error, new_error, 1)
+          elif new_error not in s:
+              raise SystemExit('apiError marker not found')
+
+          old_plans = "async function plans(force=false) {\n  if(!force && planCache.plans.length && Date.now()-planCache.at<60_000) return planCache.plans;\n  const out=await api.prices(); let list=Array.isArray(out.plans)?out.plans.filter(p=>p&&p.available!==false):[];\n  if(config.catalog.allowedPlans.size) list=list.filter(p=>config.catalog.allowedPlans.has(String(p.id||'').toLowerCase()));\n  list=list.slice(0,config.catalog.maxVisiblePlans); planCache={at:Date.now(),plans:list}; return list;\n}\nasync function findPlan(id) { let p=(await plans()).find(x=>String(x.id).toLowerCase()===String(id).toLowerCase()); if(!p)p=(await plans(true)).find(x=>String(x.id).toLowerCase()===String(id).toLowerCase()); return p||null; }"
+          new_plans = "async function plans(force=false, location='') {\n  const key=String(location||'').trim().toLowerCase()||'default';\n  const cached=planCache.get(key);\n  if(!force && cached?.plans?.length && Date.now()-cached.at<60_000) return cached.plans;\n  const out=await api.prices(key==='default'?'':key); let list=Array.isArray(out.plans)?out.plans.filter(p=>p&&p.available!==false):[];\n  if(config.catalog.allowedPlans.size) list=list.filter(p=>config.catalog.allowedPlans.has(String(p.id||'').toLowerCase()));\n  list=list.slice(0,config.catalog.maxVisiblePlans); planCache.set(key,{at:Date.now(),plans:list}); return list;\n}\nasync function findPlan(id, location='') { let p=(await plans(false,location)).find(x=>String(x.id).toLowerCase()===String(id).toLowerCase()); if(!p)p=(await plans(true,location)).find(x=>String(x.id).toLowerCase()===String(id).toLowerCase()); return p||null; }"
+          if old_plans in s:
+              s = s.replace(old_plans, new_plans, 1)
+          elif new_plans not in s:
+              raise SystemExit('plans cache marker not found')
+
+          old_showplans = "  const list=(await plans()).filter(p=>upstreamPrice(p,valid)>0); const rows=[];"
+          new_showplans = "  const list=(await plans(false,location)).filter(p=>upstreamPrice(p,valid)>0); const rows=[];"
+          if old_showplans in s:
+              s = s.replace(old_showplans, new_showplans, 1)
+          elif new_showplans not in s:
+              raise SystemExit('showPlans marker not found')
+
+          old_showplan = "  const p=await findPlan(planId); if(!p)return bot.sendMessage(q.message.chat.id,'این پلن دیگر موجود نیست.');"
+          new_showplan = "  const p=await findPlan(planId,location); if(!p)return bot.sendMessage(q.message.chat.id,'این پلن در لوکیشن انتخابی موجود نیست. لطفاً پلن دیگری انتخاب کنید.');"
+          if old_showplan in s:
+              s = s.replace(old_showplan, new_showplan, 1)
+          elif new_showplan not in s:
+              raise SystemExit('showPlan marker not found')
+
+          old_buy = "  const userId=String(q.from.id), chatId=q.message.chat.id, p=await findPlan(planId);"
+          new_buy = "  const userId=String(q.from.id), chatId=q.message.chat.id, p=await findPlan(planId,location);"
+          if old_buy in s:
+              s = s.replace(old_buy, new_buy, 1)
+          elif new_buy not in s:
+              raise SystemExit('buy marker not found')
+
+          old_missing = "  if(!p)return bot.sendMessage(chatId,'پلن انتخاب‌شده دیگر موجود نیست.');"
+          new_missing = "  if(!p)return bot.sendMessage(chatId,'این پلن در لوکیشن انتخابی قابل ارائه نیست. لطفاً پلن دیگری انتخاب کنید.');"
+          if old_missing in s:
+              s = s.replace(old_missing, new_missing, 1)
+          elif new_missing not in s:
+              raise SystemExit('buy missing-plan marker not found')
+
+          p.write_text(s)
+          PY
+
+          npm install
+          npm test
+          git diff --check
+
+      - name: Commit fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/mahan-patch.js
+          if ! git diff --cached --quiet; then
+            git commit -m 'fix: scope Mahan plans by selected location'
+            git push origin HEAD:main
+          fi
