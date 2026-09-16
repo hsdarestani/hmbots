@@ -1,0 +1,72 @@
+name: Fix unsupported-location recovery
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/fix-unsupported-location-recovery.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Clear stale location cache after upstream rejection
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src/mahan-location-catalog.js')
+          s = p.read_text()
+          old = """  } catch (error) {
+    await db.credit(userId, sale);
+    await bot.editMessageText(
+      `❌ ساخت سرور انجام نشد و مبلغ کامل به کیف پول برگشت داده شد.\\n\\n${friendlyError(error)}`,
+      { chat_id: chatId, message_id: statusMessage.message_id }
+    );
+  }"""
+          new = """  } catch (error) {
+    await db.credit(userId, sale);
+    const staleLocation = error instanceof CoreApiError && (
+      error.code === 'UNSUPPORTED_LOCATION' ||
+      /unsupported location for server type/i.test(String(error.message || ''))
+    );
+    if (staleLocation) cache.delete(validLocation);
+    await bot.editMessageText(
+      `❌ ساخت سرور انجام نشد و مبلغ کامل به کیف پول برگشت داده شد.\\n\\n${friendlyError(error)}${staleLocation ? '\\n\\nلیست این لوکیشن تازه‌سازی شد؛ لطفاً دوباره پلن را انتخاب کنید.' : ''}`,
+      {
+        chat_id: chatId,
+        message_id: statusMessage.message_id,
+        reply_markup: staleLocation ? { inline_keyboard: [[{ text: '🔄 پلن‌های معتبر این لوکیشن', callback_data: `mxloc:${validDuration}:${validLocation}` }]] } : undefined
+      }
+    );
+  }"""
+          if old not in s and new not in s:
+              raise SystemExit('buy catch marker not found')
+          if old in s:
+              s = s.replace(old, new, 1)
+          p.write_text(s)
+          PY
+          node --check src/mahan-location-catalog.js
+          npm test
+          git diff --check
+
+      - name: Commit recovery fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/mahan-location-catalog.js
+          if ! git diff --cached --quiet; then
+            git commit -m 'fix: refresh stale location catalog after rejected purchase'
+            git push origin HEAD:main
+          fi
