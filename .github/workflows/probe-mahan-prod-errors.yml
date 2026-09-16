@@ -1,0 +1,37 @@
+name: Probe Mahan production purchase errors
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/probe-mahan-prod-errors.yml'
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Read recent bot logs safely
+        env:
+          SERVER_IP: ${{ secrets.SERVER_IP }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PASSWORD: ${{ secrets.SERVER_PASSWORD }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass
+          export SSHPASS="$SERVER_PASSWORD"
+          SSH_ARGS="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=15"
+          sshpass -e ssh $SSH_ARGS "$SERVER_USER@$SERVER_IP" '
+            set -eu
+            cd /opt/mahan-cloud-bot
+            if docker compose version >/dev/null 2>&1; then
+              compose() { docker compose "$@"; }
+            else
+              compose() { docker-compose "$@"; }
+            fi
+            echo "=== recent relevant logs ==="
+            compose -p mahan-cloud-bot logs --no-color --since=90m bot 2>&1 \
+              | grep -Ei "mahan-location-catalog|UNSUPPORTED_LOCATION|unsupported location|mxbuy|createServer|upstream|purchase|plan|location|CoreApiError" \
+              | tail -n 300 || true
+          '
