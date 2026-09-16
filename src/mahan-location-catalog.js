@@ -229,9 +229,18 @@ async function buy(bot, q, duration, location, planId) {
     );
   } catch (error) {
     await db.credit(userId, sale);
+    const staleLocation = error instanceof CoreApiError && (
+      error.code === 'UNSUPPORTED_LOCATION' ||
+      /unsupported location for server type/i.test(String(error.message || ''))
+    );
+    if (staleLocation) cache.delete(validLocation);
     await bot.editMessageText(
-      `❌ ساخت سرور انجام نشد و مبلغ کامل به کیف پول برگشت داده شد.\n\n${friendlyError(error)}`,
-      { chat_id: chatId, message_id: statusMessage.message_id }
+      `❌ ساخت سرور انجام نشد و مبلغ کامل به کیف پول برگشت داده شد.\n\n${friendlyError(error)}${staleLocation ? '\n\nلیست این لوکیشن تازه‌سازی شد؛ لطفاً دوباره پلن را انتخاب کنید.' : ''}`,
+      {
+        chat_id: chatId,
+        message_id: statusMessage.message_id,
+        reply_markup: staleLocation ? { inline_keyboard: [[{ text: '🔄 پلن‌های معتبر این لوکیشن', callback_data: `mxloc:${validDuration}:${validLocation}` }]] } : undefined
+      }
     );
   }
 }
