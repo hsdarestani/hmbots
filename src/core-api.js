@@ -54,6 +54,7 @@ class CoreApi {
     return this.request('GET', `/prices${suffix}`);
   }
   listServers() { return this.request('GET', '/servers'); }
+  images(serverType) { return this.request('GET', `/images?server_type=${encodeURIComponent(String(serverType || '').trim().toLowerCase())}`); }
   getServer(id) { return this.request('GET', `/servers/${encodeURIComponent(id)}`); }
   createServer(payload) { return this.request('POST', '/servers', payload); }
   deleteServer(id) { return this.request('DELETE', `/servers/${encodeURIComponent(id)}`); }
