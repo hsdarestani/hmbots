@@ -39,11 +39,58 @@ jobs:
               req.on('error', reject);
             });
           }
+          function getPath(path) {
+            return new Promise((resolve, reject) => {
+              const req = https.get(`https://pay.hamooncloud.ir/api/v1${path}`, {
+                headers: { Authorization: `Bearer ${key}`, Accept: 'application/json' }
+              }, res => {
+                let body = '';
+                res.on('data', chunk => body += chunk);
+                res.on('end', () => {
+                  let json = null;
+                  try { json = JSON.parse(body); } catch {}
+                  resolve({ status: res.statusCode, json });
+                });
+              });
+              req.on('error', reject);
+            });
+          }
           (async () => {
             for (const location of ['nbg1','fsn1','hel1','ash','hil','sin']) {
               const {status,json} = await get(location);
               const plans = Array.isArray(json?.plans) ? json.plans.map(p => String(p.id || '')).filter(Boolean) : [];
               console.log(JSON.stringify({location,status,count:plans.length,plans}));
+            }
+
+            const list = await getPath('/servers');
+            if (list.status !== 200 || !Array.isArray(list.json?.servers)) {
+              console.log(JSON.stringify({server_audit_error:true,status:list.status}));
+              return;
+            }
+            const latest = list.json.servers.slice(0, 30);
+            const summary = {};
+            for (const row of latest) {
+              const state = String(row.status || 'unknown').toLowerCase();
+              summary[state] = (summary[state] || 0) + 1;
+            }
+            console.log('=== reseller delivery audit ===');
+            console.log(JSON.stringify({count:latest.length,statuses:summary}));
+            for (const row of latest) {
+              const id = String(row.server_id || row.id || '');
+              if (!id) continue;
+              const detail = await getPath(`/servers/${encodeURIComponent(id)}`);
+              const server = detail.json?.server || row;
+              const provider = detail.json?.provider || {};
+              console.log(JSON.stringify({
+                id_tail:id.slice(-8),
+                lifecycle_status:server.status || row.status || null,
+                delivered_at:server.delivered_at || row.delivered_at || null,
+                quality:server.ip_quality_summary || row.ip_quality_summary || null,
+                tracked_ip:server.public_ip || row.public_ip || null,
+                provider_status:provider.status || null,
+                provider_ip:provider.public_ip || null,
+                ip_matches:!provider.public_ip || !server.public_ip ? null : String(provider.public_ip) === String(server.public_ip)
+              }));
             }
           })().catch(e => { console.error(e.message); process.exit(1); });
           NODE
