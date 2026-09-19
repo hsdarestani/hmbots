@@ -191,7 +191,13 @@ async function showMyServers(chatId, userId) {
   await bot.sendMessage(chatId, `🖥 سرورهای من\n\nتعداد: ${servers.length}`, { reply_markup: { inline_keyboard: keyboard } });
 }
 function serverProviderStatus(remote) {
-  return String(remote?.provider?.status || remote?.server?.status || '').toLowerCase();
+  // The upstream purchase lifecycle is authoritative. It only becomes active
+  // after the SSH/readiness and Iran IP-quality gate has passed. Falling back
+  // to the raw provider status is only for legacy responses that do not expose
+  // a lifecycle status.
+  const lifecycleStatus = String(remote?.server?.status || '').trim().toLowerCase();
+  if (lifecycleStatus) return lifecycleStatus;
+  return String(remote?.provider?.status || '').trim().toLowerCase();
 }
 async function showServer(chatId, userId, serverId, messageId = null) {
   const local = await db.getOwnedServer(serverId, userId);
