@@ -305,7 +305,11 @@ async function provisioningWatcher() {
         const status = serverProviderStatus(remote) || row.status;
         const ip = remote?.provider?.public_ip || row.public_ip || null;
         await db.updateServerState(row.server_id, { status, publicIp: ip });
-        const ready = ['running', 'active'].includes(status);
+        // Never expose credentials from provider state alone. Upstream sets
+        // delivered_at only after the full delivery barrier (SSH + IP quality,
+        // including Iran reachability) has passed.
+        const deliveredAt = remote?.server?.delivered_at || null;
+        const ready = ['running', 'active'].includes(status) && !!deliveredAt;
         if (!ready) continue;
         let password = row.pending_password;
         if (!password) {
