@@ -165,15 +165,88 @@ async function showPlan(bot, q, duration, location, planId) {
     );
   }
 
+  let images = [];
+  try {
+    const response = await api.images(plan.id);
+    images = Array.isArray(response?.images) ? response.images : [];
+  } catch (error) {
+    console.error('[mahan-image-catalog]', error);
+    return bot.sendMessage(
+      q.message.chat.id,
+      '⚠️ دریافت لیست سیستم‌عامل‌ها موقتاً ممکن نشد. لطفاً چند لحظه بعد دوباره تلاش کنید.',
+      { reply_markup: { inline_keyboard: [[{ text: '🔄 تلاش دوباره', callback_data: `mxplan:${validDuration}:${validLocation}:${plan.id}` }]] } }
+    );
+  }
+
+  const usable = images
+    .map(image => ({
+      value: String(image?.name || image?.id || '').trim(),
+      label: String(image?.label || image?.name || image?.id || '').trim()
+    }))
+    .filter(image => image.value && image.label)
+    .slice(0, 40);
+
+  if (!usable.length) {
+    return bot.sendMessage(
+      q.message.chat.id,
+      '⚠️ برای این پلن فعلاً سیستم‌عامل سازگاری از Hetzner دریافت نشد.',
+      { reply_markup: { inline_keyboard: [[{ text: '↩️ بازگشت', callback_data: `mxloc:${validDuration}:${validLocation}` }]] } }
+    );
+  }
+
+  const rows = usable.map(image => [{
+    text: `💿 ${image.label}`,
+    callback_data: `mxos:${validDuration}:${validLocation}:${plan.id}:${encodeURIComponent(image.value)}`
+  }]);
+  rows.push([{ text: '↩️ بازگشت به پلن‌ها', callback_data: `mxloc:${validDuration}:${validLocation}` }]);
+
+  return editOrSend(
+    bot,
+    q,
+    `🧾 جزئیات سفارش\n\n${String(plan.id).toUpperCase()}\n⚙️ ${specs(plan)}\n🗓 دوره: ${durationFa(validDuration)}\n📍 لوکیشن: ${locLabel(validLocation)}\n💵 قیمت نهایی: ${money(await finalPrice(plan, validDuration))}\n\n💿 سیستم‌عامل موردنظر را انتخاب کنید:`,
+    rows
+  );
+}
+
+async function confirmPlan(bot, q, duration, location, planId, encodedImage) {
+  const validDuration = ['hourly', 'monthly'].includes(duration) ? duration : 'monthly';
+  const validLocation = String(location || '').trim().toLowerCase();
+  const plan = await findPlan(validLocation, planId);
+  await bot.answerCallbackQuery(q.id).catch(() => {});
+  if (!plan || !(upstreamPrice(plan, validDuration) > 0)) {
+    return showPlans(bot, q, validDuration, validLocation);
+  }
+
+  let requestedImage = '';
+  try { requestedImage = decodeURIComponent(String(encodedImage || '')); }
+  catch (_) { requestedImage = String(encodedImage || ''); }
+
+  const response = await api.images(plan.id);
+  const images = Array.isArray(response?.images) ? response.images : [];
+  const selected = images.find(image => {
+    const id = String(image?.id || '').trim().toLowerCase();
+    const name = String(image?.name || '').trim().toLowerCase();
+    return requestedImage.trim().toLowerCase() === id || requestedImage.trim().toLowerCase() === name;
+  });
+  if (!selected) {
+    return bot.sendMessage(
+      q.message.chat.id,
+      '⚠️ این سیستم‌عامل دیگر برای پلن انتخابی در دسترس نیست. لطفاً دوباره انتخاب کنید.',
+      { reply_markup: { inline_keyboard: [[{ text: '↩️ انتخاب سیستم‌عامل', callback_data: `mxplan:${validDuration}:${validLocation}:${plan.id}` }]] } }
+    );
+  }
+
+  const imageValue = String(selected.name || selected.id).trim();
+  const imageLabel = String(selected.label || selected.name || selected.id).trim();
   const sale = await finalPrice(plan, validDuration);
-  const text = `🧾 جزئیات سفارش\n\n${String(plan.id).toUpperCase()}\n⚙️ ${specs(plan)}\n🗓 دوره: ${durationFa(validDuration)}\n📍 لوکیشن: ${locLabel(validLocation)}\n💵 قیمت نهایی: ${money(sale)}\n💿 سیستم‌عامل: ${config.catalog.defaultImage}\n\nقبل از کسر موجودی، اعتبار پلن برای همین لوکیشن دوباره بررسی می‌شود.`;
+  const text = `🧾 تأیید سفارش\n\n${String(plan.id).toUpperCase()}\n⚙️ ${specs(plan)}\n🗓 دوره: ${durationFa(validDuration)}\n📍 لوکیشن: ${locLabel(validLocation)}\n💿 سیستم‌عامل: ${imageLabel}\n💵 قیمت نهایی: ${money(sale)}\n\nقبل از کسر موجودی، پلن و سیستم‌عامل دوباره بررسی می‌شوند.`;
   return editOrSend(bot, q, text, [
-    [{ text: `✅ تأیید و پرداخت ${money(sale)}`, callback_data: `mxbuy:${validDuration}:${validLocation}:${plan.id}` }],
-    [{ text: '↩️ بازگشت', callback_data: `mxloc:${validDuration}:${validLocation}` }]
+    [{ text: `✅ تأیید و پرداخت ${money(sale)}`, callback_data: `mxbuy:${validDuration}:${validLocation}:${plan.id}:${encodeURIComponent(imageValue)}` }],
+    [{ text: '↩️ تغییر سیستم‌عامل', callback_data: `mxplan:${validDuration}:${validLocation}:${plan.id}` }]
   ]);
 }
 
-async function buy(bot, q, duration, location, planId) {
+async function buy(bot, q, duration, location, planId, encodedImage) {
   const validDuration = ['hourly', 'monthly'].includes(duration) ? duration : 'monthly';
   const validLocation = String(location || '').trim().toLowerCase();
   const userId = String(q.from.id);
@@ -190,6 +263,27 @@ async function buy(bot, q, duration, location, planId) {
       { reply_markup: { inline_keyboard: [[{ text: '↩️ پلن‌های معتبر', callback_data: `mxloc:${validDuration}:${validLocation}` }]] } }
     );
   }
+
+
+  let requestedImage = '';
+  try { requestedImage = decodeURIComponent(String(encodedImage || '')); }
+  catch (_) { requestedImage = String(encodedImage || ''); }
+  if (!requestedImage) return showPlan(bot, q, validDuration, validLocation, plan.id);
+
+  const imageResponse = await api.images(plan.id);
+  const availableImages = Array.isArray(imageResponse?.images) ? imageResponse.images : [];
+  const selectedImage = availableImages.find(image => {
+    const id = String(image?.id || '').trim().toLowerCase();
+    const name = String(image?.name || '').trim().toLowerCase();
+    const wanted = requestedImage.trim().toLowerCase();
+    return wanted === id || wanted === name;
+  });
+  if (!selectedImage) {
+    await bot.answerCallbackQuery(q.id, { text: 'سیستم‌عامل انتخاب‌شده دیگر در دسترس نیست.', show_alert: true }).catch(() => {});
+    return showPlan(bot, q, validDuration, validLocation, plan.id);
+  }
+  const imageValue = String(selectedImage.name || selectedImage.id).trim();
+  const imageLabel = String(selectedImage.label || selectedImage.name || selectedImage.id).trim();
 
   const base = upstreamPrice(plan, validDuration);
   const sale = await finalPrice(plan, validDuration);
@@ -211,7 +305,7 @@ async function buy(bot, q, duration, location, planId) {
     const result = await api.createServer({
       server_type: String(plan.id),
       duration: validDuration,
-      image: config.catalog.defaultImage,
+      image: imageValue,
       location: validLocation,
       name: `c${userId}-${Date.now()}`
     });
@@ -224,7 +318,7 @@ async function buy(bot, q, duration, location, planId) {
       [String(server.id), userId, String(plan.id), validDuration, sale, base, server.status || 'provisioning', server.public_ip || null, validLocation, next, 'active']
     );
     await bot.editMessageText(
-      `✅ سفارش ثبت شد.\n\nشناسه: #${String(server.id).slice(-8)}\nپلن: ${String(plan.id).toUpperCase()} • ${specs(plan)}\n📍 ${locLabel(validLocation)}\nمبلغ: ${money(sale)}\nتمدید بعدی: ${new Date(next).toLocaleString('fa-IR')}\n\nبعد از آماده‌شدن IP و رمز ارسال می‌شود.`,
+      `✅ سفارش ثبت شد.\n\nشناسه: #${String(server.id).slice(-8)}\nپلن: ${String(plan.id).toUpperCase()} • ${specs(plan)}\n📍 ${locLabel(validLocation)}\n💿 ${imageLabel}\nمبلغ: ${money(sale)}\nتمدید بعدی: ${new Date(next).toLocaleString('fa-IR')}\n\nبعد از آماده‌شدن IP و رمز ارسال می‌شود.`,
       { chat_id: chatId, message_id: statusMessage.message_id }
     );
   } catch (error) {
@@ -256,8 +350,18 @@ async function handle(bot, q) {
     await showPlan(bot, q, match[1], match[2], match[3]);
     return true;
   }
+  if ((match = data.match(/^mxos:(hourly|monthly):([^:]+):([^:]+):(.+)$/))) {
+    await confirmPlan(bot, q, match[1], match[2], match[3], match[4]);
+    return true;
+  }
+  if ((match = data.match(/^mxbuy:(hourly|monthly):([^:]+):([^:]+):(.+)$/))) {
+    await buy(bot, q, match[1], match[2], match[3], match[4]);
+    return true;
+  }
+  // Old buttons from messages sent before OS selection was added are routed
+  // back to the image picker instead of silently creating Ubuntu 24.04.
   if ((match = data.match(/^mxbuy:(hourly|monthly):([^:]+):(.+)$/))) {
-    await buy(bot, q, match[1], match[2], match[3]);
+    await showPlan(bot, q, match[1], match[2], match[3]);
     return true;
   }
   return false;
