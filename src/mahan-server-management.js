@@ -287,15 +287,89 @@ async function changeIpQuote(bot,q,serverId) {
   await bot.answerCallbackQuery(q.id).catch(()=>{});
   return bot.sendMessage(q.message.chat.id,`🔄 تغییر IP رایگان\n\nIPv4 اصلی سرور #${shortId(serverId)} با یک IP جدید جایگزین می‌شود. سرور ممکن است برای مدت کوتاهی خاموش شود.\n\nبرای مشتری Mahan این عملیات رایگان است.`,{reply_markup:{inline_keyboard:[[{text:'✅ تغییر IP',callback_data:`mxipok:${serverId}`}],[{text:'❌ انصراف',callback_data:`srv:${serverId}`}]]}});
 }
+async function waitForChangedIp(serverId, previousIp, timeoutMs=120000) {
+  const started=Date.now();
+  while(Date.now()-started<timeoutMs) {
+    try {
+      const response=await api.getServer(serverId);
+      const remote=response.provider||response.server||null;
+      const ip=remote?.public_ip||remote?.public_net?.ipv4?.ip||null;
+      if(ip && (!previousIp || String(ip)!==String(previousIp))) return String(ip);
+    } catch (_) {}
+    await new Promise(resolve=>setTimeout(resolve,5000));
+  }
+  return null;
+}
+
 async function changeIpConfirm(bot,q,serverId) {
-  const lock=`ip:${serverId}`; if(actionLocks.has(lock))return bot.answerCallbackQuery(q.id,{text:'تغییر IP در حال انجام است…'});actionLocks.add(lock);
+  const lock=`ip:${serverId}`;
+  if(actionLocks.has(lock)) return bot.answerCallbackQuery(q.id,{text:'تغییر IP در حال انجام است…'});
+  actionLocks.add(lock);
+
+  let progressMessage=null;
+  let previousIp=null;
   try {
-    if(!await owned(serverId,q.from.id))return false;
-    await bot.answerCallbackQuery(q.id,{text:'در حال تغییر IP…'}).catch(()=>{});
-    const result=await api.changeIp(serverId);
-    await db.run('UPDATE servers SET public_ip=? WHERE server_id=?',[result.new_ip||null,serverId]);
-    return showServer(bot,q,serverId,`✅ IP تغییر کرد: ${result.old_ip||'—'} → ${result.new_ip||'—'}`);
-  } catch(error){return bot.answerCallbackQuery(q.id,{text:apiMessage(error),show_alert:true});} finally{actionLocks.delete(lock);}
+    const row=await owned(serverId,q.from.id);
+    if(!row) return false;
+    previousIp=row.public_ip||null;
+
+    await bot.answerCallbackQuery(q.id,{text:'درخواست تغییر IP ثبت شد…'}).catch(()=>{});
+    progressMessage=await bot.sendMessage(
+      q.message.chat.id,
+      `⏳ تغییر IP سرور #${shortId(serverId)} شروع شد.\n\nاین عملیات ممکن است چند دقیقه طول بکشد. نتیجه نهایی همین‌جا اعلام می‌شود؛ لازم نیست دوباره دکمه را بزنید.`
+    ).catch(()=>null);
+
+    let result=null;
+    try {
+      result=await api.changeIp(serverId);
+    } catch(error) {
+      // If the HTTP response is lost or the upstream returns after our request
+      // failed, reconcile against the real provider state before reporting a failure.
+      const recoveredIp=await waitForChangedIp(
+        serverId,
+        previousIp,
+        error instanceof CoreApiError && error.code==='NETWORK_ERROR' ? 120000 : 20000
+      );
+      if(recoveredIp) result={old_ip:previousIp,new_ip:recoveredIp,reconciled:true};
+      else throw error;
+    }
+
+    const newIp=result?.new_ip || await waitForChangedIp(serverId,previousIp,45000);
+    if(!newIp) {
+      throw new CoreApiError('تغییر IP از سمت سرویس تأمین تأیید نشد. لطفاً دوباره تلاش کنید.',{code:'IP_CHANGE_NOT_CONFIRMED'});
+    }
+
+    await db.run('UPDATE servers SET public_ip=? WHERE server_id=?',[newIp,serverId]);
+    const oldIp=result?.old_ip||previousIp||'—';
+    const successText=`✅ IP با موفقیت تغییر کرد.\n\nسرور: #${shortId(serverId)}\nIP قبلی: ${oldIp}\nIP جدید: ${newIp}`;
+
+    if(progressMessage?.message_id) {
+      await bot.editMessageText(successText,{
+        chat_id:q.message.chat.id,
+        message_id:progressMessage.message_id,
+        reply_markup:{inline_keyboard:[[{text:'↩️ مدیریت سرور',callback_data:`srv:${serverId}`}]]}
+      }).catch(()=>bot.sendMessage(q.message.chat.id,successText));
+    } else {
+      await bot.sendMessage(q.message.chat.id,successText).catch(()=>{});
+    }
+
+    return showServer(bot,q,serverId);
+  } catch(error) {
+    const message=`❌ تغییر IP انجام نشد.\n\n${apiMessage(error)}`;
+    if(progressMessage?.message_id) {
+      return bot.editMessageText(message,{
+        chat_id:q.message.chat.id,
+        message_id:progressMessage.message_id,
+        reply_markup:{inline_keyboard:[
+          [{text:'🔄 تلاش دوباره',callback_data:`mxip:${serverId}`}],
+          [{text:'↩️ مدیریت سرور',callback_data:`srv:${serverId}`}]
+        ]}
+      }).catch(()=>bot.sendMessage(q.message.chat.id,message));
+    }
+    return bot.sendMessage(q.message.chat.id,message).catch(()=>{});
+  } finally {
+    actionLocks.delete(lock);
+  }
 }
 
 async function addIpQuote(bot,q,serverId) {
