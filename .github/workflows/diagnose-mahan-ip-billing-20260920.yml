@@ -1,0 +1,57 @@
+name: Diagnose Mahan IP and billing
+
+on:
+  push:
+    paths:
+      - '.github/workflows/diagnose-mahan-ip-billing-20260920.yml'
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Inspect upstream API and production bot state
+        env:
+          HAMOON_API_KEY: ${{ secrets.HAMOON_API_KEY }}
+          SERVER_IP: ${{ secrets.SERVER_IP }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PASSWORD: ${{ secrets.SERVER_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          auth=(-H "Authorization: Bearer $HAMOON_API_KEY")
+          base="https://pay.hamooncloud.ir/api/v1"
+
+          echo "=== upstream /me ==="
+          curl -fsS --max-time 20 "${auth[@]}" "$base/me" | python3 -m json.tool || true
+
+          echo "=== upstream /wallet ==="
+          curl -fsS --max-time 20 "${auth[@]}" "$base/wallet" | python3 -m json.tool || true
+
+          echo "=== upstream server 66621727 ==="
+          curl -sS --max-time 20 "${auth[@]}" "$base/servers/66621727" | python3 -m json.tool || true
+
+          echo "=== upstream prices (first 12) ==="
+          curl -fsS --max-time 20 "${auth[@]}" "$base/prices"             | python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps({"ok":d.get("ok"),"plans":[{"id":p.get("id"),"amount_hourly":p.get("amount_hourly"),"amount_monthly":p.get("amount_monthly")} for p in (d.get("plans") or [])[:12]]},ensure_ascii=False,indent=2))' || true
+
+          echo "=== local Mahan bot sqlite rows ==="
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass
+          export SSHPASS="$SERVER_PASSWORD"
+          SSH_ARGS="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=15"
+          sshpass -e ssh $SSH_ARGS "$SERVER_USER@$SERVER_IP" '
+            set -eu
+            DB=/opt/mahan-cloud-bot/data/bot.sqlite
+            if [ ! -f "$DB" ]; then echo "db_not_found"; exit 0; fi
+            if ! command -v sqlite3 >/dev/null 2>&1; then
+              apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sqlite3
+            fi
+            echo "--- server row ---"
+            sqlite3 -header -column "$DB" "SELECT server_id,owner_id,plan_id,duration,sale_price,upstream_price,status,public_ip,location,next_billing_at,billing_state,deleted_at FROM servers WHERE server_id LIKE '''%66621727''' ORDER BY created_at DESC LIMIT 5;" || true
+            echo "--- pricing settings ---"
+            sqlite3 -header -column "$DB" "SELECT key,value FROM app_settings WHERE key IN ('''hourly_extra''','''monthly_markup''') ORDER BY key;" || true
+          '
