@@ -178,19 +178,57 @@ async function owned(serverId, userId) {
   return db.getOwnedServer(String(serverId), String(userId));
 }
 
+async function upstreamState(serverId) {
+  try {
+    const response=await api.getServer(serverId);
+    const lifecycle=String(response?.server?.status||'').trim().toLowerCase();
+    return { response, lifecycle, deleted:lifecycle==='deleted' };
+  } catch(error) {
+    if(error instanceof CoreApiError && error.code==='SERVER_NOT_FOUND') {
+      return { response:null, lifecycle:'deleted', deleted:true, error };
+    }
+    throw error;
+  }
+}
+
+async function removeStaleLocalServer(serverId) {
+  try {
+    const state=await upstreamState(serverId);
+    if(!state.deleted) return false;
+    await db.markDeleted(serverId).catch(()=>{});
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
 async function showServer(bot, q, serverId, notice='') {
   const userId = String(q.from.id);
   const row = await owned(serverId, userId);
   if (!row) return bot.answerCallbackQuery(q.id, { text: 'سرور پیدا نشد.', show_alert: true }).catch(() => {});
+  let response = null;
   let remote = null;
+  let lifecycleStatus = '';
   try {
-    const response = await api.getServer(serverId);
-    remote = response.provider || response.server || null;
-    await db.updateServerState(serverId, remote?.status || row.status, remote?.public_ip || row.public_ip).catch(() => {});
+    const state = await upstreamState(serverId);
+    response = state.response;
+    lifecycleStatus = state.lifecycle;
+    if (state.deleted) {
+      await db.markDeleted(serverId).catch(() => {});
+      await bot.answerCallbackQuery(q.id,{text:'این سرور قبلاً حذف شده و از لیست پاک شد.',show_alert:true}).catch(()=>{});
+      return bot.editMessageText(
+        `🗑 سرور #${shortId(serverId)} دیگر در سرویس اصلی فعال نیست و از «سرورهای من» حذف شد.`,
+        {chat_id:q.message.chat.id,message_id:q.message.message_id,reply_markup:{inline_keyboard:[[{text:'↩️ سرورهای من',callback_data:'myservers'}]]}}
+      ).catch(()=>bot.sendMessage(q.message.chat.id,`🗑 سرور #${shortId(serverId)} دیگر فعال نیست و از لیست پاک شد.`));
+    }
+    remote = response?.provider || response?.server || null;
+    const status = lifecycleStatus || remote?.status || row.status;
+    const publicIp = response?.provider?.public_ip || remote?.public_ip || row.public_ip;
+    await db.updateServerState(serverId,{status,publicIp}).catch(() => {});
   } catch (_) {}
   const plan = await findPlan(row.plan_id).catch(() => null);
-  const status = remote?.status || row.status || 'unknown';
-  const ip = remote?.public_ip || row.public_ip || 'در حال تخصیص';
+  const status = lifecycleStatus || remote?.status || row.status || 'unknown';
+  const ip = response?.provider?.public_ip || remote?.public_ip || row.public_ip || 'در حال تخصیص';
   const next = row.next_billing_at ? new Date(row.next_billing_at).toLocaleString('fa-IR') : '—';
   const lines = [
     notice,
@@ -284,6 +322,9 @@ async function upgradeConfirm(bot,q,serverId,targetId) {
 
 async function changeIpQuote(bot,q,serverId) {
   const row=await owned(serverId,q.from.id); if(!row)return false;
+  if(await removeStaleLocalServer(serverId)) {
+    return bot.answerCallbackQuery(q.id,{text:'این سرور قبلاً حذف شده بود و از لیست پاک شد.',show_alert:true}).catch(()=>{});
+  }
   await bot.answerCallbackQuery(q.id).catch(()=>{});
   return bot.sendMessage(q.message.chat.id,`🔄 تغییر IP رایگان\n\nIPv4 اصلی سرور #${shortId(serverId)} با یک IP جدید جایگزین می‌شود. سرور ممکن است برای مدت کوتاهی خاموش شود.\n\nبرای مشتری Mahan این عملیات رایگان است.`,{reply_markup:{inline_keyboard:[[{text:'✅ تغییر IP',callback_data:`mxipok:${serverId}`}],[{text:'❌ انصراف',callback_data:`srv:${serverId}`}]]}});
 }
@@ -355,18 +396,21 @@ async function changeIpConfirm(bot,q,serverId) {
 
     return showServer(bot,q,serverId);
   } catch(error) {
-    const message=`❌ تغییر IP انجام نشد.\n\n${apiMessage(error)}`;
+    const stale=await removeStaleLocalServer(serverId);
+    const message=stale
+      ? `🗑 این سرور قبلاً در سرویس اصلی حذف شده بود و از لیست سرورهای Mahan هم پاک شد.\n\nبرای تغییر IP، یکی از سرورهای فعال را انتخاب کنید.`
+      : `❌ تغییر IP انجام نشد.\n\n${apiMessage(error)}`;
+    const keyboard=stale
+      ? [[{text:'↩️ سرورهای من',callback_data:'myservers'}]]
+      : [[{text:'🔄 تلاش دوباره',callback_data:`mxip:${serverId}`}],[{text:'↩️ مدیریت سرور',callback_data:`srv:${serverId}`}]];
     if(progressMessage?.message_id) {
       return bot.editMessageText(message,{
         chat_id:q.message.chat.id,
         message_id:progressMessage.message_id,
-        reply_markup:{inline_keyboard:[
-          [{text:'🔄 تلاش دوباره',callback_data:`mxip:${serverId}`}],
-          [{text:'↩️ مدیریت سرور',callback_data:`srv:${serverId}`}]
-        ]}
+        reply_markup:{inline_keyboard:keyboard}
       }).catch(()=>bot.sendMessage(q.message.chat.id,message));
     }
-    return bot.sendMessage(q.message.chat.id,message).catch(()=>{});
+    return bot.sendMessage(q.message.chat.id,message,{reply_markup:{inline_keyboard:keyboard}}).catch(()=>{});
   } finally {
     actionLocks.delete(lock);
   }
