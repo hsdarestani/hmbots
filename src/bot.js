@@ -183,8 +183,36 @@ async function notifyAdminsTopup(request, user) {
     ]] } }).catch(() => {});
   }
 }
+async function reconcileUserServers(userId, localServers) {
+  try {
+    const response=await api.listServers();
+    const remoteServers=Array.isArray(response?.servers)?response.servers:[];
+    const byId=new Map(remoteServers.map(server=>[
+      String(server?.server_id||server?.id||''),
+      server
+    ]));
+    for(const local of localServers) {
+      const remote=byId.get(String(local.server_id));
+      if(!remote) continue;
+      const status=String(remote.status||'').trim().toLowerCase();
+      if(status==='deleted') {
+        await db.markDeleted(local.server_id).catch(()=>{});
+        continue;
+      }
+      await db.updateServerState(local.server_id,{
+        status:status||local.status,
+        publicIp:remote.public_ip||local.public_ip
+      }).catch(()=>{});
+    }
+  } catch(error) {
+    console.warn('[server-reconcile]',error.code||error.message||error);
+  }
+  return db.listUserServers(userId);
+}
+
 async function showMyServers(chatId, userId) {
-  const servers = await db.listUserServers(userId);
+  let servers = await db.listUserServers(userId);
+  servers = await reconcileUserServers(userId, servers);
   if (!servers.length) return bot.sendMessage(chatId, 'هنوز سروری ندارید.', { reply_markup: { inline_keyboard: [[{ text: '🛒 خرید سرور', callback_data: `plans:${config.catalog.defaultDuration}:0` }], [{ text: '🏠 منوی اصلی', callback_data: 'home' }]] } });
   const keyboard = servers.slice(0, 30).map(s => [{ text: `🖥 ${String(s.plan_id).toUpperCase()} • #${shortId(s.server_id)} • ${s.status}`, callback_data: `srv:${s.server_id}` }]);
   keyboard.push([{ text: '🏠 منوی اصلی', callback_data: 'home' }]);
@@ -203,7 +231,23 @@ async function showServer(chatId, userId, serverId, messageId = null) {
   const local = await db.getOwnedServer(serverId, userId);
   if (!local) return bot.sendMessage(chatId, 'این سرور برای حساب شما پیدا نشد.');
   let remote = null;
-  try { remote = await api.getServer(serverId); } catch (_) {}
+  try {
+    remote = await api.getServer(serverId);
+    const lifecycleStatus=String(remote?.server?.status||'').trim().toLowerCase();
+    if(lifecycleStatus==='deleted') {
+      await db.markDeleted(serverId).catch(()=>{});
+      return bot.sendMessage(chatId,`🗑 سرور #${shortId(serverId)} قبلاً در سرویس اصلی حذف شده بود و از لیست شما هم پاک شد.`,{
+        reply_markup:{inline_keyboard:[[{text:'↩️ سرورهای من',callback_data:'myservers'}]]}
+      });
+    }
+  } catch (error) {
+    if(error instanceof CoreApiError && error.code==='SERVER_NOT_FOUND') {
+      await db.markDeleted(serverId).catch(()=>{});
+      return bot.sendMessage(chatId,`🗑 سرور #${shortId(serverId)} دیگر در سرویس اصلی وجود ندارد و از لیست شما پاک شد.`,{
+        reply_markup:{inline_keyboard:[[{text:'↩️ سرورهای من',callback_data:'myservers'}]]}
+      });
+    }
+  }
   const providerStatus = serverProviderStatus(remote) || local.status;
   const ip = remote?.provider?.public_ip || local.public_ip || 'در حال دریافت';
   await db.updateServerState(serverId, { status: providerStatus, publicIp: ip === 'در حال دریافت' ? local.public_ip : ip }).catch(() => {});
