@@ -32,6 +32,9 @@ jobs:
           echo "=== upstream /wallet ==="
           curl -fsS --max-time 20 "${auth[@]}" "$base/wallet" | python3 -m json.tool || true
 
+          echo "=== upstream recent servers ==="
+          curl -fsS --max-time 20 "${auth[@]}" "$base/servers"             | python3 -c 'import json,sys; d=json.load(sys.stdin); rows=d.get("servers") or []; keep=["server_id","id","flavor_id","plan_id","duration","amount","status","public_ip","delivered_at","last_billed_at","pricing_mode","monthly_basis_price"]; print(json.dumps([{k:r.get(k) for k in keep} for r in rows[:30]],ensure_ascii=False,indent=2))' || true
+
           echo "=== upstream server 66621727 ==="
           curl -sS --max-time 20 "${auth[@]}" "$base/servers/66621727" | python3 -m json.tool || true
 
@@ -45,13 +48,24 @@ jobs:
           SSH_ARGS="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=15"
           sshpass -e ssh $SSH_ARGS "$SERVER_USER@$SERVER_IP" '
             set -eu
-            DB=/opt/mahan-cloud-bot/data/bot.sqlite
-            if [ ! -f "$DB" ]; then echo "db_not_found"; exit 0; fi
-            if ! command -v sqlite3 >/dev/null 2>&1; then
-              apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sqlite3
+            cd /opt/mahan-cloud-bot
+            if docker compose version >/dev/null 2>&1; then
+              compose() { docker compose "$@"; }
+            else
+              compose() { docker-compose "$@"; }
             fi
-            echo "--- server row ---"
-            sqlite3 -header -column "$DB" "SELECT server_id,owner_id,plan_id,duration,sale_price,upstream_price,status,public_ip,location,next_billing_at,billing_state,deleted_at FROM servers WHERE server_id LIKE '''%66621727''' ORDER BY created_at DESC LIMIT 5;" || true
-            echo "--- pricing settings ---"
-            sqlite3 -header -column "$DB" "SELECT key,value FROM app_settings WHERE key IN ('''hourly_extra''','''monthly_markup''') ORDER BY key;" || true
+            CID="$(compose -p mahan-cloud-bot ps -q bot)"
+            test -n "$CID"
+            echo "--- local server rows ---"
+            docker exec "$CID" node - <<'''NODE''' || true
+const sqlite3=require("sqlite3").verbose();
+const db=new sqlite3.Database("/app/data/bot.sqlite");
+db.all("SELECT server_id,owner_id,plan_id,duration,sale_price,upstream_price,status,public_ip,location,next_billing_at,billing_state,deleted_at,created_at FROM servers ORDER BY created_at DESC LIMIT 30",[],(e,rows)=>{
+  if(e){console.error(e.message);process.exitCode=1;} else console.log(JSON.stringify(rows,null,2));
+  db.all("SELECT key,value FROM app_settings WHERE key IN (?,?,?,?,?)",["hourly_extra","monthly_markup","extra_ip_price","extra_traffic_tb_price","low_balance_threshold"],(e2,settings)=>{
+    if(e2) console.error(e2.message); else console.log(JSON.stringify({settings},null,2));
+    db.close();
+  });
+});
+NODE
           '
