@@ -27,10 +27,10 @@ class CoreApi {
     });
   }
 
-  async request(method, path, data) {
+  async request(method, path, data, options = {}) {
     let response;
     try {
-      response = await this.http.request({ method, url: path, data });
+      response = await this.http.request({ method, url: path, data, ...options });
     } catch (error) {
       throw new CoreApiError('سرویس اصلی در دسترس نیست.', { code: 'NETWORK_ERROR' });
     }
@@ -65,7 +65,13 @@ class CoreApi {
   traffic(id) { return this.request('GET', `/servers/${encodeURIComponent(id)}/traffic`); }
   changeBillingCycle(id, duration) { return this.request('POST', `/servers/${encodeURIComponent(id)}/billing-cycle`, { duration }); }
   safeUpgrade(id, targetServerType, upgradeDisk = false) { return this.request('POST', `/servers/${encodeURIComponent(id)}/upgrade-safe`, { target_server_type: targetServerType, upgrade_disk: !!upgradeDisk }); }
-  changeIp(id) { return this.request('POST', `/servers/${encodeURIComponent(id)}/change-ip`, {}); }
+  changeIp(id) {
+    // Change-IP can legitimately take longer than normal API calls because the
+    // upstream performs several Hetzner actions (power off, detach/attach IP,
+    // power on and readiness checks). Do not abort it at the normal 25s timeout.
+    const timeout = Math.max(Number(this.http.defaults.timeout || 0), 300000);
+    return this.request('POST', `/servers/${encodeURIComponent(id)}/change-ip`, {}, { timeout });
+  }
   listAdditionalIps(id) { return this.request('GET', `/servers/${encodeURIComponent(id)}/additional-ips`); }
   addAdditionalIp(id, description = '') { return this.request('POST', `/servers/${encodeURIComponent(id)}/additional-ips`, { description }); }
   deleteAdditionalIp(id, floatingIpId) { return this.request('DELETE', `/servers/${encodeURIComponent(id)}/additional-ips/${encodeURIComponent(floatingIpId)}`); }
