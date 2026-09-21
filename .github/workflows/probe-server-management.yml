@@ -1,0 +1,48 @@
+name: Probe server management
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/probe-server-management.yml'
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Read production management logs
+        env:
+          SERVER_IP: ${{ secrets.SERVER_IP }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PASSWORD: ${{ secrets.SERVER_PASSWORD }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass
+          export SSHPASS="$SERVER_PASSWORD"
+          SSH_ARGS="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=15"
+          sshpass -e ssh $SSH_ARGS "$SERVER_USER@$SERVER_IP" '
+            set -eu
+            cd /opt/mahan-cloud-bot
+            if docker compose version >/dev/null 2>&1; then
+              compose() { docker compose "$@"; }
+            else
+              compose() { docker-compose "$@"; }
+            fi
+
+            echo "=== BOT IDENTITY ==="
+            TOKEN="$(awk -F= "/^BOT_TOKEN=/{sub(/^BOT_TOKEN=/,\"\"); print; exit}" .env)"
+            curl -fsS "https://api.telegram.org/bot$TOKEN/getMe" | python3 -c "import sys,json; j=json.load(sys.stdin); r=j.get('result',{}); print(json.dumps({'ok':j.get('ok'),'id':r.get('id'),'username':r.get('username'),'first_name':r.get('first_name')},ensure_ascii=False))"
+            unset TOKEN
+
+            echo "=== CONTAINER ==="
+            docker inspect mahan-cloud-bot-bot-1 --format "{{.State.Status}} {{.RestartCount}} {{.Config.Image}}"
+
+            echo "=== CALLBACK/MANAGEMENT LOGS ==="
+            compose -p mahan-cloud-bot logs --no-color --since=6h bot 2>&1               | grep -Ei "callback|mahan-management|polling|srv:|server-reconcile|CoreApiError|SERVER_NOT_FOUND|SQLITE|database is locked|SQLITE_BUSY|ECONN|ETIMEDOUT|AxiosError|upstream"               | tail -n 1200 || true
+
+            echo "=== LAST 300 RAW ==="
+            compose -p mahan-cloud-bot logs --no-color --tail=300 bot 2>&1 || true
+          '
