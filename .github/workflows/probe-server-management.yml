@@ -33,8 +33,8 @@ jobs:
             fi
 
             echo "=== BOT IDENTITY ==="
-            TOKEN="$(awk -F= "/^BOT_TOKEN=/{sub(/^BOT_TOKEN=/,\"\"); print; exit}" .env)"
-            curl -fsS "https://api.telegram.org/bot$TOKEN/getMe" | python3 -c "import sys,json; j=json.load(sys.stdin); r=j.get('result',{}); print(json.dumps({'ok':j.get('ok'),'id':r.get('id'),'username':r.get('username'),'first_name':r.get('first_name')},ensure_ascii=False))"
+            TOKEN="$(grep '^BOT_TOKEN=' .env | head -1 | cut -d= -f2-)"
+            curl -fsS "https://api.telegram.org/bot$TOKEN/getMe" | grep -oE '"username":"[^"]+"|"first_name":"[^"]+"|"id":[0-9]+' | head -3 || true
             unset TOKEN
 
             echo "=== CONTAINER ==="
