@@ -5,7 +5,17 @@ const config = require('./config');
 const Database = require('./db');
 const { CoreApi, CoreApiError } = require('./core-api');
 
-const bot = new TelegramBot(config.botToken, { polling: true });
+const bot = new TelegramBot(config.botToken, {
+  polling: {
+    params: {
+      // Telegram keeps the previous allowed_updates filter if it is omitted.
+      // Reset to the default update set on every start so callback_query is
+      // always delivered to inline server-management buttons.
+      allowed_updates: JSON.stringify([])
+    }
+  }
+});
+console.log('[startup] polling allowed_updates reset; callback_query enabled');
 const db = new Database(config.dbPath);
 const api = new CoreApi(config.upstream);
 const states = new Map();
